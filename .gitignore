@@ -31,7 +31,3 @@ Thumbs.db
 # Config files with secrets (keep examples)
 config.yaml
 !config.example.yaml
-
-# Build artifacts
-example/server
-example-db/server
