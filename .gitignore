@@ -32,4 +32,6 @@ Thumbs.db
 config.yaml
 !config.example.yaml
 
-example*/
+# Build artifacts
+example/server
+example-db/server

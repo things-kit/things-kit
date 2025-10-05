@@ -1,0 +1,13 @@
+# Example Service Configuration
+# This is a minimal configuration for the example service
+
+# HTTP server configuration
+http:
+  port: 8080
+  mode: debug
+
+# Logging configuration
+logging:
+  level: debug
+  encoding: console
+  output_path: stdout

@@ -1,0 +1,285 @@
+package integration
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/things-kit/example-db/internal/testutil"
+	"github.com/things-kit/example-db/internal/user"
+	"go.uber.org/fx"
+
+	_ "github.com/lib/pq"
+)
+
+// TestUserAPI tests the user API end-to-end with a real PostgreSQL database
+func TestUserAPI(t *testing.T) {
+	// Start PostgreSQL container
+	pgContainer := testutil.StartPostgresContainer(t)
+	defer pgContainer.Terminate(t)
+
+	// Initialize schema
+	schemaPath := "../../schema.sql"
+	pgContainer.InitSchema(t, schemaPath)
+
+	// Configure viper with test database DSN
+	v := viper.New()
+	v.Set("db.dsn", pgContainer.DSN)
+	v.Set("http.port", 0) // Use random available port
+	v.Set("http.mode", "test")
+	v.Set("logging.level", "error")
+
+	// Start the application
+	app := createTestApp(t, v)
+	app.Start(t)
+	defer app.Stop(t)
+
+	// Get the server address
+	serverAddr := getServerAddr(t)
+
+	// Run tests
+	t.Run("Health check", func(t *testing.T) {
+		resp, err := http.Get(fmt.Sprintf("http://%s/health", serverAddr))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Create user", func(t *testing.T) {
+		newUser := user.CreateUserRequest{
+			Name:  "John Doe",
+			Email: "john@example.com",
+		}
+
+		body, err := json.Marshal(newUser)
+		require.NoError(t, err)
+
+		resp, err := http.Post(
+			fmt.Sprintf("http://%s/users", serverAddr),
+			"application/json",
+			bytes.NewBuffer(body),
+		)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		var createdUser user.User
+		err = json.NewDecoder(resp.Body).Decode(&createdUser)
+		require.NoError(t, err)
+
+		assert.NotZero(t, createdUser.ID)
+		assert.Equal(t, newUser.Name, createdUser.Name)
+		assert.Equal(t, newUser.Email, createdUser.Email)
+		assert.False(t, createdUser.CreatedAt.IsZero())
+		assert.False(t, createdUser.UpdatedAt.IsZero())
+	})
+
+	t.Run("List users", func(t *testing.T) {
+		resp, err := http.Get(fmt.Sprintf("http://%s/users", serverAddr))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var users []*user.User
+		err = json.NewDecoder(resp.Body).Decode(&users)
+		require.NoError(t, err)
+
+		assert.NotEmpty(t, users)
+		assert.Equal(t, "John Doe", users[0].Name)
+	})
+
+	t.Run("Get user by ID", func(t *testing.T) {
+		resp, err := http.Get(fmt.Sprintf("http://%s/users/1", serverAddr))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var retrievedUser user.User
+		err = json.NewDecoder(resp.Body).Decode(&retrievedUser)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(1), retrievedUser.ID)
+		assert.Equal(t, "John Doe", retrievedUser.Name)
+	})
+
+	t.Run("Update user", func(t *testing.T) {
+		updateReq := user.CreateUserRequest{
+			Name:  "Jane Doe",
+			Email: "jane@example.com",
+		}
+
+		body, err := json.Marshal(updateReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest(
+			http.MethodPut,
+			fmt.Sprintf("http://%s/users/1", serverAddr),
+			bytes.NewBuffer(body),
+		)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var updatedUser user.User
+		err = json.NewDecoder(resp.Body).Decode(&updatedUser)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(1), updatedUser.ID)
+		assert.Equal(t, "Jane Doe", updatedUser.Name)
+		assert.Equal(t, "jane@example.com", updatedUser.Email)
+	})
+
+	t.Run("Delete user", func(t *testing.T) {
+		req, err := http.NewRequest(
+			http.MethodDelete,
+			fmt.Sprintf("http://%s/users/1", serverAddr),
+			nil,
+		)
+		require.NoError(t, err)
+
+		client := &http.Client{}
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+		// Verify user is deleted
+		resp, err = http.Get(fmt.Sprintf("http://%s/users/1", serverAddr))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+
+	t.Run("Create multiple users", func(t *testing.T) {
+		users := []user.CreateUserRequest{
+			{Name: "Alice", Email: "alice@example.com"},
+			{Name: "Bob", Email: "bob@example.com"},
+			{Name: "Charlie", Email: "charlie@example.com"},
+		}
+
+		for _, u := range users {
+			body, err := json.Marshal(u)
+			require.NoError(t, err)
+
+			resp, err := http.Post(
+				fmt.Sprintf("http://%s/users", serverAddr),
+				"application/json",
+				bytes.NewBuffer(body),
+			)
+			require.NoError(t, err)
+			resp.Body.Close()
+
+			assert.Equal(t, http.StatusCreated, resp.StatusCode)
+		}
+
+		// Verify all users are in the list
+		resp, err := http.Get(fmt.Sprintf("http://%s/users", serverAddr))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var allUsers []*user.User
+		err = json.NewDecoder(resp.Body).Decode(&allUsers)
+		require.NoError(t, err)
+
+		assert.Len(t, allUsers, 3)
+	})
+}
+
+// TestCustomConfig tests that custom configuration works correctly
+func TestCustomConfig(t *testing.T) {
+	// Start PostgreSQL container
+	pgContainer := testutil.StartPostgresContainer(t)
+	defer pgContainer.Terminate(t)
+
+	// Initialize schema
+	schemaPath := "../../schema.sql"
+	pgContainer.InitSchema(t, schemaPath)
+
+	// Create a temporary config file
+	configContent := fmt.Sprintf(`
+http:
+  port: 0
+  mode: test
+
+logging:
+  level: error
+
+db:
+  dsn: "%s"
+`, pgContainer.DSN)
+
+	tmpFile, err := os.CreateTemp("", "config-*.yaml")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+
+	_, err = tmpFile.WriteString(configContent)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	// Configure viper to read from the temp file
+	v := viper.New()
+	v.SetConfigFile(tmpFile.Name())
+	err = v.ReadInConfig()
+	require.NoError(t, err)
+
+	// Verify config was loaded correctly
+	assert.Equal(t, pgContainer.DSN, v.GetString("db.dsn"))
+	assert.Equal(t, "test", v.GetString("http.mode"))
+
+	// Start the application with custom config
+	app := createTestApp(t, v)
+	app.Start(t)
+	defer app.Stop(t)
+
+	// Verify the app is working
+	serverAddr := getServerAddr(t)
+	resp, err := http.Get(fmt.Sprintf("http://%s/health", serverAddr))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// Helper functions
+
+type testApp struct {
+	app *fx.App
+}
+
+func createTestApp(t *testing.T, v *viper.Viper) *testApp {
+	// Import necessary packages
+	return &testApp{}
+}
+
+func (ta *testApp) Start(t *testing.T) {
+	// Implementation will use fx to start the app
+}
+
+func (ta *testApp) Stop(t *testing.T) {
+	// Implementation will use fx to stop the app
+}
+
+func getServerAddr(t *testing.T) string {
+	// Return the test server address
+	// For now, use localhost:8080 but this should be dynamic
+	time.Sleep(100 * time.Millisecond) // Give server time to start
+	return "localhost:8080"
+}

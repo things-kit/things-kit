@@ -1,0 +1,10 @@
+http:
+  port: 8080
+  mode: release
+
+logging:
+  level: info
+  encoding: json
+
+db:
+  dsn: "postgres://user:password@localhost:5432/testdb?sslmode=disable"
