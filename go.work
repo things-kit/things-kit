@@ -1,0 +1,21 @@
+go 1.24.0
+
+toolchain go1.24.4
+
+use (
+	./app
+	./example
+	./example-db
+	./module/cache
+	./module/grpc
+	./module/http
+	./module/httpgin
+	./module/kafka
+	./module/log
+	./module/logging
+	./module/messaging
+	./module/redis
+	./module/sqlc
+	./module/testing
+	./module/viperconfig
+)
