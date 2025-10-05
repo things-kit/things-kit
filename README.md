@@ -19,10 +19,30 @@ Things-Kit is a microservice framework for Go designed to bring the productivity
 
 ## Quick Start
 
-See the [example service](./example/) for a complete working example.
+### Examples
+
+Check out our complete example projects:
+
+1. **[things-kit-example](https://github.com/things-kit/things-kit-example)** - Basic HTTP server
+   - Demonstrates Gin framework integration
+   - Service layer pattern
+   - Dependency injection basics
+
+2. **[things-kit-example-db](https://github.com/things-kit/things-kit-example-db)** - HTTP + PostgreSQL
+   - Complete CRUD REST API
+   - Repository pattern
+   - Database integration with sqlc
+   - Integration tests with testcontainers ✅
+   - All tests passing
+
+### Running an Example
 
 ```bash
-cd example
+# Clone an example
+git clone https://github.com/things-kit/things-kit-example.git
+cd things-kit-example
+
+# Configure and run
 cp config.example.yaml config.yaml
 go run ./cmd/server
 ```
@@ -58,9 +78,6 @@ All framework-provided modules are organized under `module/`:
 - `module/testing/` - Testing utilities for integration tests
 
 ⭐ = Default implementation (interface + impl pattern)
-
-### Example
-- `example/` - Complete working example service demonstrating HTTP, logging, and DI
 
 ## Getting Started
 
@@ -108,15 +125,17 @@ go run ./cmd/server
 ## Documentation
 
 - [Detailed Plan](./plan.md) - Complete architectural documentation and implementation details
-- [Example Service](./example/README.md) - Working example with usage patterns
+- [Abstractions Guide](./ABSTRACTIONS.md) - Framework abstraction patterns and interfaces
 - [Configuration Example](./config.example.yaml) - Full configuration reference
+- [things-kit-example](https://github.com/things-kit/things-kit-example) - Basic HTTP server example
+- [things-kit-example-db](https://github.com/things-kit/things-kit-example-db) - PostgreSQL integration example
 
 ## Development
 
 ### Building All Modules
 
 ```bash
-for dir in app logging module/* example; do
+for dir in app module/*; do
   if [ -d "$dir" ] && [ -f "$dir/go.mod" ]; then
     (cd "$dir" && go build ./...)
   fi
@@ -126,7 +145,7 @@ done
 ### Testing
 
 ```bash
-for dir in app logging module/* example; do
+for dir in app module/*; do
   if [ -d "$dir" ] && [ -f "$dir/go.mod" ]; then
     (cd "$dir" && go test ./...)
   fi
